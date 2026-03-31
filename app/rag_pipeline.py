@@ -21,6 +21,7 @@ def retrieve(query, top_k=5):
         results.append({
             "text": metadata[i]["text"],
             "page": metadata[i]["page"],
+            "paragraph": metadata[i].get("paragraph"),
             "reference": metadata[i].get("reference", "Unknown"),
             "score": float(D[0][idx]) if len(D[0]) > idx else 0.0
         })
