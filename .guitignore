@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+data/index/
+data/processed/
+*.faiss
+*.pkl
