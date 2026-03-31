@@ -15,6 +15,112 @@ from app.llm import generate_answer
 from app.confidence import calculate_confidence
 
 
+# ================= STYLE =================
+st.set_page_config(layout="wide")
+
+st.markdown("""
+<style>
+
+/* ===== Background ===== */
+.stApp {
+    background: none;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: url("https://i.ibb.co/yzj7dwz/vivid-blurred-colorful-wallpaper-background.jpg");
+    background-size: cover;
+    background-position: center;
+    opacity: 0.5;
+    z-index: -10;
+}
+
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    backdrop-filter: blur(10px);
+    background: rgba(255,255,255,0.25);
+    z-index: -9;
+}
+
+/* ===== Header ===== */
+.header-box {
+    backdrop-filter: blur(20px);
+    background: rgba(255,255,255,0.6);
+    border-radius: 20px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+}
+
+/* ===== Glass ===== */
+.glass {
+    backdrop-filter: blur(20px);
+    background: rgba(255,255,255,0.65);
+    border-radius: 20px;
+    padding: 24px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+}
+
+/* ===== Chat ===== */
+.user-bubble {
+    background: #007AFF;
+    color: white;
+    padding: 12px 18px;
+    border-radius: 20px;
+    max-width: 70%;
+    margin-left: auto;
+    margin-bottom: 12px;
+}
+
+.assistant-bubble {
+    background: rgba(255,255,255,0.9);
+    padding: 12px 18px;
+    border-radius: 20px;
+    max-width: 70%;
+    margin-right: auto;
+    margin-bottom: 12px;
+}
+
+/* ===== CHAT INPUT FIX (DER WICHTIGE PART) ===== */
+
+/* kompletter wrapper */
+div[data-testid="stChatInput"] {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}
+
+/* innerer grauer balken */
+div[data-testid="stChatInput"] > div {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* textarea */
+textarea {
+    border-radius: 20px !important;
+    padding: 14px !important;
+    background: rgba(255,255,255,0.9) !important;
+}
+
+/* ===== Layout ===== */
+.block-container {
+    padding-top: 2rem;
+}
+
+[data-testid="column"] {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
 # ================= HELPERS =================
 def extract_json(text):
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -40,9 +146,6 @@ def classification_label(c):
     return mapping.get(c, c)
 
 
-st.set_page_config(layout="wide")
-
-
 # ================= STATE =================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -62,41 +165,38 @@ col1, col2 = st.columns([2, 1])
 
 # ================= CHAT =================
 with col1:
-    st.title("AI Act Chat")
 
-    # Chat history anzeigen
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
+    st.markdown('<div class="header-box"><h2>EU AI Act Chat</h2></div>', unsafe_allow_html=True)
 
-    # Input
-    user_input = st.chat_input("Ask something...")
+    # ✅ WICHTIG: KEIN offenes div mehr!
+    with st.container():
 
-    if user_input:
-        st.session_state.pending_query = user_input
+        for msg in st.session_state.messages:
+            if msg["role"] == "user":
+                st.markdown(f'<div class="user-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="assistant-bubble">{msg["content"]}</div>', unsafe_allow_html=True)
 
-    # Verarbeitung
-    if st.session_state.pending_query:
+        user_input = st.chat_input("Ask something...")
 
-        query = st.session_state.pending_query
-        st.session_state.pending_query = None
+        if user_input:
+            st.session_state.pending_query = user_input
 
-        # User message speichern
-        st.session_state.messages.append({
-            "role": "user",
-            "content": query
-        })
+        if st.session_state.pending_query:
 
-        with st.chat_message("assistant"):
+            query = st.session_state.pending_query
+            st.session_state.pending_query = None
+
+            st.session_state.messages.append({
+                "role": "user",
+                "content": query
+            })
+
             with st.spinner("Thinking..."):
 
-                # RAG
                 results = retrieve(query)
-
-                # Decision Engine
                 decision_data = analyze_question(query)
 
-                # LLM Answer
                 raw = generate_answer(
                     query,
                     results,
@@ -109,14 +209,10 @@ with col1:
                 try:
                     answer = json.loads(clean)
                 except:
-                    answer = {
-                        "answer": raw
-                    }
+                    answer = {"answer": raw}
 
-                # Confidence
                 confidence = calculate_confidence(results, decision_data, raw)
 
-                # DEBUG speichern
                 st.session_state.last_debug = {
                     "confidence": confidence,
                     "classification": answer.get("classification", ""),
@@ -124,74 +220,42 @@ with col1:
                     "sources": results
                 }
 
-                # Antwort anzeigen
-                st.write(answer["answer"])
-
-                # 🔥 WICHTIG: Follow-ups kommen jetzt aus ENGINE
-                st.session_state.follow_up = generate_followups(decision_data["decision_tree"])
-
-                # Assistant message speichern
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": answer["answer"]
                 })
 
-    # ================= FOLLOW UPS =================
-    if st.session_state.follow_up:
-        st.markdown("### Need more details:")
+                st.session_state.follow_up = generate_followups(decision_data["decision_tree"])
 
-        inputs = []
-
-        for i, q in enumerate(st.session_state.follow_up):
-            val = st.text_input(q, key=f"follow_{i}")
-            inputs.append(val)
-
-        if st.button("Refine Answer"):
-
-            structured = " ".join([
-                f"{q}: {a}" for q, a in zip(st.session_state.follow_up, inputs) if a
-            ])
-
-            # letzte user frage holen
-            last_user = None
-            for msg in reversed(st.session_state.messages):
-                if msg["role"] == "user":
-                    last_user = msg["content"]
-                    break
-
-            new_query = f"{last_user}\nAdditional details:\n{structured}"
-
-            # reset
-            st.session_state.follow_up = []
-            st.session_state.pending_query = new_query
-
-            st.rerun()
+                st.rerun()
 
 
 # ================= INSIGHTS =================
 with col2:
-    st.title("Insights")
 
-    debug = st.session_state.last_debug
+    st.markdown('<div class="header-box"><h2>Insights</h2></div>', unsafe_allow_html=True)
 
-    if debug:
-        st.markdown("### Confidence")
-        st.progress(float(debug["confidence"]))
-        st.write(f"{round(debug['confidence']*100)}% ({confidence_label(debug['confidence'])})")
+    with st.container():
 
-        st.markdown("### Classification")
-        st.write(classification_label(debug["classification"]))
+        debug = st.session_state.last_debug
 
-        st.markdown("### Decision Flow")
-        for step in debug["decision_tree"]:
-            icon = "✅" if step["value"] else "❌"
-            st.write(f"{icon} {step['step']}")
+        if debug:
+            st.markdown("### Confidence")
+            st.progress(float(debug["confidence"]))
+            st.write(f"{round(debug['confidence']*100)}% ({confidence_label(debug['confidence'])})")
 
-        st.markdown("### Sources")
+            st.markdown("### Classification")
+            st.write(classification_label(debug["classification"]))
 
-        for s in debug["sources"]:
-            title = f"{s['reference']}"
+            st.markdown("### Decision Flow")
+            for step in debug["decision_tree"]:
+                icon = "✅" if step["value"] else "❌"
+                st.write(f"{icon} {step['step']}")
 
-            with st.expander(title):
-                st.caption(f"Relevance score: {round(s['score'], 3)}")
-                st.write(s["text"])
+            st.markdown("### Sources")
+            for s in debug["sources"]:
+                title = f"{s.get('reference','Unknown')}"
+
+                with st.expander(title):
+                    st.caption(f"Relevance score: {round(s.get('score',0), 3)}")
+                    st.write(s["text"])
