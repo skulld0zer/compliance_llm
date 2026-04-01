@@ -145,9 +145,9 @@ def _pretty_step_name(step_name):
 
 def decision_step_label(step_name):
     labels = {
-        "surveillance_detected": "Monitoring/Surveillance erkannt",
-        "employment_context": "Arbeitskontext erkannt",
-        "biometric_usage": "Biometrische Daten im Einsatz",
+        "surveillance_detected": "Monitoring/Surveillance detected",
+        "employment_context": "Employment context detected",
+        "biometric_usage": "Biometric data in use",
     }
     return labels.get(step_name, _pretty_step_name(step_name))
 
@@ -158,9 +158,9 @@ def render_decision_flow_diagram(decision_tree, classification):
         return
 
     logic_explanations = {
-        "surveillance_detected": "Prueft, ob Monitoring-Keywords wie monitor/track vorkommen.",
-        "employment_context": "Prueft, ob Bezug zu employee/worker vorhanden ist.",
-        "biometric_usage": "Prueft, ob biometrische Hinweise (face/voice/emotion) vorkommen.",
+        "surveillance_detected": "Checks whether monitoring keywords like monitor/track are present.",
+        "employment_context": "Checks whether an employee/worker context is present.",
+        "biometric_usage": "Checks whether biometric indicators (face/voice/emotion) are present.",
     }
 
     for i, step in enumerate(decision_tree, start=1):
@@ -184,8 +184,8 @@ def render_decision_flow_diagram(decision_tree, classification):
     st.markdown(
         f"""
         <div class="flow-card" style="border-width:2px;">
-            <div class="flow-step-title">Finale Einstufung - <span style="color:{final_color};">{classification_label(classification)}</span></div>
-            <div class="flow-meta">Ergebnis aus der kombinierten Bewertung der obigen Regeln.</div>
+            <div class="flow-step-title">Final Classification - <span style="color:{final_color};">{classification_label(classification)}</span></div>
+            <div class="flow-meta">Outcome based on the combined evaluation of the rules above.</div>
         </div>
         """,
         unsafe_allow_html=True

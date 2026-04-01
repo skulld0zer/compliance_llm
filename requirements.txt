@@ -1,0 +1,11 @@
+streamlit
+plotly
+python-dotenv
+openai
+sentence-transformers
+faiss-cpu
+requests
+beautifulsoup4
+fastapi
+uvicorn
+pydantic
