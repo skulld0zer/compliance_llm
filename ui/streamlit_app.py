@@ -4,6 +4,7 @@ import base64
 import streamlit as st
 import json
 import re
+from datetime import datetime
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -14,6 +15,7 @@ from app.rag_pipeline import retrieve
 from app.decision_engine import analyze_question, generate_followups
 from app.llm import generate_answer
 from app.confidence import calculate_confidence
+from app.assessment_store import DEFAULT_STATUSES, delete_assessment, load_assessments, upsert_assessment, update_assessment_status
 
 
 # ================= STYLE =================
@@ -312,6 +314,96 @@ h3 {{
     color: #5b7282;
 }}
 
+.governance-card {{
+    background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.42));
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 24px;
+    padding: 18px 18px 16px 18px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+    margin-bottom: 16px;
+}}
+
+.governance-card h3 {{
+    margin: 0 0 10px 0 !important;
+    font-size: 1.1rem;
+}}
+
+.kpi-grid {{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}}
+
+.kpi-pill {{
+    background: rgba(255,255,255,0.46);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 18px;
+    padding: 14px 12px;
+}}
+
+.kpi-label {{
+    color: #5b7282;
+    font-size: 0.82rem;
+    margin-bottom: 6px;
+}}
+
+.kpi-value {{
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #0f172a;
+}}
+
+.case-card {{
+    background: rgba(255,255,255,0.36);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 20px;
+    padding: 14px 14px 10px 14px;
+    margin-bottom: 12px;
+}}
+
+.case-title {{
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.4;
+    margin-bottom: 6px;
+}}
+
+.case-meta {{
+    color: #587082;
+    font-size: 0.88rem;
+    margin-bottom: 10px;
+}}
+
+.status-badge {{
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+}}
+
+.status-draft {{
+    background: rgba(59, 130, 246, 0.14);
+    color: #1d4ed8;
+}}
+
+.status-needs-more-info {{
+    background: rgba(245, 158, 11, 0.16);
+    color: #b45309;
+}}
+
+.status-in-review {{
+    background: rgba(168, 85, 247, 0.14);
+    color: #7e22ce;
+}}
+
+.status-approved {{
+    background: rgba(16, 185, 129, 0.14);
+    color: #047857;
+}}
+
 @keyframes insightEnter {{
     from {{
         opacity: 0;
@@ -336,10 +428,64 @@ def extract_json(text):
 
 
 def classification_label(c):
+    normalized = str(c or "").strip().lower().replace("_", "-")
     return {
         "high-risk": "⚠️ High Risk",
+        "transparency": "Transparency Obligations",
         "minimal": "✅ Minimal",
-    }.get(c, c)
+        "unclear": "Needs More Input",
+    }.get(normalized, c)
+
+
+def normalize_classification(value):
+    normalized = str(value or "").strip().lower().replace("_", "-")
+    mapping = {
+        "highrisk": "high-risk",
+        "high-risk": "high-risk",
+        "transparency": "transparency",
+        "transparency-obligation": "transparency",
+        "minimal": "minimal",
+        "low-risk": "minimal",
+        "unclear": "unclear",
+        "needs-more-info": "unclear",
+    }
+    return mapping.get(normalized, normalized or "unclear")
+
+
+def _step_map(decision_tree):
+    return {step.get("step"): bool(step.get("value")) for step in (decision_tree or [])}
+
+
+def resolve_final_classification(raw_classification, decision_data):
+    normalized = normalize_classification(raw_classification)
+    step_values = _step_map((decision_data or {}).get("decision_tree", []))
+    pre_classification = str((decision_data or {}).get("pre_classification", "")).strip().lower()
+
+    if step_values.get("personal_assistant_context") and not any([
+        step_values.get("surveillance_detected"),
+        step_values.get("employment_context"),
+        step_values.get("employment_decision_impact"),
+        step_values.get("biometric_identification"),
+        step_values.get("emotion_recognition"),
+        step_values.get("biometric_usage"),
+    ]):
+        return "minimal"
+
+    if (
+        pre_classification == "transparency_candidate"
+        and not step_values.get("employment_decision_impact")
+        and not step_values.get("biometric_identification")
+        and not step_values.get("emotion_recognition")
+    ):
+        return "transparency"
+
+    if pre_classification in {"potential_high_risk", "high_risk_candidate", "sensitive_prohibited_or_high_risk_candidate"}:
+        return "high-risk"
+
+    if normalized in {"high-risk", "transparency", "minimal", "unclear"}:
+        return normalized
+
+    return "unclear"
 
 
 def render_gauge(confidence):
@@ -400,6 +546,8 @@ def render_decision_flow_diagram(decision_tree, classification):
     if not decision_tree:
         st.info("No decision flow data available.")
         return
+
+    classification = normalize_classification(classification)
 
     for i, step in enumerate(decision_tree, start=1):
         status = "PASS" if step["value"] else "FAIL"
@@ -487,6 +635,17 @@ def build_followup_context(base_query, follow_up_questions, answers):
     return combined_query, transcript
 
 
+def build_rule_analysis_query(base_query, follow_up_questions, answers):
+    facts = [str(base_query or "").strip()]
+
+    for idx, _question in enumerate(follow_up_questions):
+        answer = str(answers.get(idx, "")).strip()
+        if answer:
+            facts.append(answer)
+
+    return "\n".join(part for part in facts if part).strip()
+
+
 def typing_indicator_html():
     return """
     <div class="assistant-bubble">
@@ -499,6 +658,92 @@ def typing_indicator_html():
     """
 
 
+def status_class(status):
+    return (
+        status.lower()
+        .replace(" ", "-")
+    )
+
+
+def format_saved_timestamp(timestamp):
+    if not timestamp:
+        return "Unknown"
+
+    try:
+        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        return dt.strftime("%d %b %Y, %H:%M")
+    except ValueError:
+        return timestamp
+
+
+def build_assessment_record(title_override=None, status="Draft"):
+    debug = st.session_state.last_debug or {}
+    if not debug:
+        return None
+
+    user_messages = [msg for msg in st.session_state.messages if msg.get("role") == "user" and not msg.get("typing")]
+    last_user_message = user_messages[-1]["content"] if user_messages else "Untitled assessment"
+
+    title = title_override.strip() if title_override and title_override.strip() else last_user_message[:80]
+
+    existing_status = status
+    if st.session_state.active_assessment_id:
+        current_cases = load_assessments()
+        existing = next((item for item in current_cases if item.get("id") == st.session_state.active_assessment_id), None)
+        if existing and existing.get("status"):
+            existing_status = existing["status"]
+
+    return {
+        "id": st.session_state.active_assessment_id,
+        "title": title,
+        "status": existing_status,
+        "classification": normalize_classification(debug.get("classification", "")),
+        "confidence": debug.get("confidence", 0.0),
+        "messages": st.session_state.messages,
+        "follow_up": st.session_state.follow_up,
+        "resolved_followups": st.session_state.resolved_followups,
+        "debug": debug,
+        "summary": next(
+            (msg.get("content", "") for msg in reversed(st.session_state.messages) if msg.get("role") == "assistant" and not msg.get("typing")),
+            ""
+        ),
+    }
+
+
+def load_assessment_into_workspace(assessment):
+    st.session_state.messages = assessment.get("messages", [])
+    st.session_state.last_debug = assessment.get("debug")
+    st.session_state.follow_up = assessment.get("follow_up", [])
+    st.session_state.resolved_followups = assessment.get("resolved_followups", [])
+    st.session_state.answers = {}
+    st.session_state.pending_query = None
+    st.session_state.pending_rule_query = None
+    st.session_state.display_query = None
+    st.session_state.processing = False
+    st.session_state.base_query = next(
+        (msg.get("content", "") for msg in assessment.get("messages", []) if msg.get("role") == "user"),
+        ""
+    )
+    st.session_state.assessment_title_value = assessment.get("title", "")
+    st.session_state.pending_assessment_title = assessment.get("title", "")
+
+
+def reset_workspace():
+    st.session_state.messages = []
+    st.session_state.last_debug = None
+    st.session_state.follow_up = []
+    st.session_state.resolved_followups = []
+    st.session_state.answers = {}
+    st.session_state.pending_query = None
+    st.session_state.pending_rule_query = None
+    st.session_state.display_query = None
+    st.session_state.base_query = None
+    st.session_state.processing = False
+    st.session_state.active_assessment_id = None
+    st.session_state.assessment_title_value = ""
+    st.session_state.pending_assessment_title = ""
+
+
 # ================= STATE =================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -509,6 +754,9 @@ if "last_debug" not in st.session_state:
 if "follow_up" not in st.session_state:
     st.session_state.follow_up = []
 
+if "resolved_followups" not in st.session_state:
+    st.session_state.resolved_followups = []
+
 if "answers" not in st.session_state:
     st.session_state.answers = {}
 
@@ -518,19 +766,41 @@ if "pending_query" not in st.session_state:
 if "display_query" not in st.session_state:
     st.session_state.display_query = None
 
+if "pending_rule_query" not in st.session_state:
+    st.session_state.pending_rule_query = None
+
 if "base_query" not in st.session_state:
     st.session_state.base_query = None
 
 if "processing" not in st.session_state:
     st.session_state.processing = False
 
+if "assessment_title_value" not in st.session_state:
+    st.session_state.assessment_title_value = ""
+
+if "assessment_title_input" not in st.session_state:
+    st.session_state.assessment_title_input = ""
+
+if "active_assessment_id" not in st.session_state:
+    st.session_state.active_assessment_id = None
+
+if "pending_assessment_title" not in st.session_state:
+    st.session_state.pending_assessment_title = None
+
+if st.session_state.pending_assessment_title is not None:
+    st.session_state.assessment_title_value = st.session_state.pending_assessment_title
+    st.session_state.assessment_title_input = st.session_state.pending_assessment_title
+    st.session_state.pending_assessment_title = None
+
+
+assessments = load_assessments()
 
 col1, col2 = st.columns([2, 1])
 
 
 # ================= CHAT =================
 with col1:
-    st.markdown('<div class="header-box"><h2>EU AI Act Chat</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-box"><h2>EU AI Act Governance Workspace</h2></div>', unsafe_allow_html=True)
 
     for msg in st.session_state.messages:
         if msg.get("typing"):
@@ -546,8 +816,16 @@ with col1:
 
     if user_input and not st.session_state.processing:
         st.session_state.pending_query = user_input
+        st.session_state.pending_rule_query = user_input
         st.session_state.display_query = user_input
         st.session_state.base_query = user_input
+        st.session_state.active_assessment_id = None
+        st.session_state.follow_up = []
+        st.session_state.resolved_followups = []
+        st.session_state.answers = {}
+        if not st.session_state.assessment_title_value.strip():
+            st.session_state.assessment_title_value = user_input[:80]
+            st.session_state.pending_assessment_title = user_input[:80]
         st.session_state.messages.append({"role": "user", "content": user_input})
         st.session_state.messages.append({"role": "assistant", "content": "", "typing": True})
         st.session_state.processing = True
@@ -555,11 +833,13 @@ with col1:
 
     if st.session_state.pending_query and st.session_state.processing:
         query = st.session_state.pending_query
+        rule_query = st.session_state.pending_rule_query or query
         st.session_state.pending_query = None
+        st.session_state.pending_rule_query = None
         st.session_state.display_query = None
 
         results = retrieve(query)
-        decision_data = analyze_question(query)
+        decision_data = analyze_question(rule_query)
 
         raw = generate_answer(
             query,
@@ -572,6 +852,19 @@ with col1:
             answer = json.loads(extract_json(raw))
         except:
             answer = {"answer": raw}
+
+        raw_classification = normalize_classification(answer.get("classification", ""))
+        final_classification = resolve_final_classification(
+            answer.get("classification", ""),
+            decision_data
+        )
+        answer["classification"] = final_classification
+        if raw_classification and raw_classification != final_classification:
+            answer["answer"] = (
+                f"{answer.get('answer', '').rstrip()}\n\n"
+                f"Governance note: Based on the structured decision rules in this workspace, "
+                f"this case is currently treated as {classification_label(final_classification)}."
+            )
 
         confidence, confidence_breakdown = calculate_confidence(
             results,
@@ -599,7 +892,21 @@ with col1:
                 "content": answer["answer"]
             })
 
-        st.session_state.follow_up = generate_followups(decision_data["decision_tree"])
+        answer_followups = answer.get("follow_up", []) if isinstance(answer, dict) else []
+        next_followups = []
+        for question in list(answer_followups) + list(generate_followups(decision_data["decision_tree"])):
+            clean_question = str(question).strip()
+            if not clean_question:
+                continue
+            if clean_question in st.session_state.resolved_followups:
+                continue
+            if clean_question in next_followups:
+                continue
+            next_followups.append(clean_question)
+        st.session_state.follow_up = [
+            question for question in next_followups
+            if question not in st.session_state.resolved_followups
+        ]
         st.session_state.answers = {}
         st.session_state.processing = False
 
@@ -619,12 +926,22 @@ with col1:
                 )
 
             if st.button("Refine Answer"):
+                st.session_state.resolved_followups.extend(
+                    question for question in st.session_state.follow_up
+                    if question not in st.session_state.resolved_followups
+                )
                 combined, transcript = build_followup_context(
                     st.session_state.base_query or "",
                     st.session_state.follow_up,
                     st.session_state.answers
                 )
+                rule_query = build_rule_analysis_query(
+                    st.session_state.base_query or "",
+                    st.session_state.follow_up,
+                    st.session_state.answers
+                )
                 st.session_state.pending_query = combined
+                st.session_state.pending_rule_query = rule_query
                 st.session_state.display_query = transcript or combined
                 st.session_state.follow_up = []
                 st.session_state.answers = {}
@@ -640,12 +957,125 @@ with col1:
                 st.session_state.processing = True
                 st.rerun()
 
+    if st.session_state.last_debug:
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        st.markdown('<div class="governance-card">', unsafe_allow_html=True)
+        st.markdown("### Save Assessment")
+        st.caption("Capture this assessment as a reusable governance case with review status and evidence snapshot.")
+        title_value = st.text_input(
+            "Assessment title",
+            placeholder="Name this assessment...",
+            key="assessment_title_input"
+        )
+        st.session_state.assessment_title_value = title_value
+        save_col, new_case_col, info_col = st.columns([1, 1, 1])
+        with save_col:
+            if st.button("Save Current Assessment", use_container_width=True):
+                record = build_assessment_record(st.session_state.assessment_title_value, status="Draft")
+                if record:
+                    saved = upsert_assessment(record)
+                    st.session_state.active_assessment_id = saved.get("id")
+                    st.session_state.assessment_title_value = saved.get("title", "")
+                    st.session_state.pending_assessment_title = saved.get("title", "")
+                    st.success("Assessment saved to governance queue.")
+                    st.rerun()
+        with new_case_col:
+            if st.button("Create New Case", use_container_width=True):
+                reset_workspace()
+                st.session_state.pending_assessment_title = ""
+                st.rerun()
+        with info_col:
+            active_label = st.session_state.active_assessment_id or "Not saved yet"
+            st.caption(f"Active case ID: {active_label}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ================= INSIGHTS =================
 with col2:
     st.markdown('<div class="header-box"><h2>Insights</h2></div>', unsafe_allow_html=True)
 
     debug = st.session_state.last_debug
+    total_assessments = len(assessments)
+    in_review_count = sum(1 for item in assessments if item.get("status") == "In Review")
+    approved_count = sum(1 for item in assessments if item.get("status") == "Approved")
+    high_risk_count = sum(1 for item in assessments if "high" in str(item.get("classification", "")).lower())
+
+    st.markdown(
+        f"""
+        <div class="governance-card">
+            <h3>Governance Snapshot</h3>
+            <div class="kpi-grid">
+                <div class="kpi-pill">
+                    <div class="kpi-label">Total Cases</div>
+                    <div class="kpi-value">{total_assessments}</div>
+                </div>
+                <div class="kpi-pill">
+                    <div class="kpi-label">In Review</div>
+                    <div class="kpi-value">{in_review_count}</div>
+                </div>
+                <div class="kpi-pill">
+                    <div class="kpi-label">Approved</div>
+                    <div class="kpi-value">{approved_count}</div>
+                </div>
+                <div class="kpi-pill">
+                    <div class="kpi-label">High Risk</div>
+                    <div class="kpi-value">{high_risk_count}</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="governance-card">', unsafe_allow_html=True)
+    st.markdown("### Saved Assessments")
+    if not assessments:
+        st.caption("No saved assessments yet. Save the current workspace state to start a governance queue.")
+    else:
+        for assessment in assessments[:6]:
+            current_status = assessment.get("status", "Draft")
+            badge_class = status_class(current_status)
+            st.markdown(
+                f"""
+                <div class="case-card">
+                    <div class="status-badge status-{badge_class}">{current_status}</div>
+                    <div class="case-title">{assessment.get("title", "Untitled assessment")}</div>
+                    <div class="case-meta">
+                        Updated {format_saved_timestamp(assessment.get("updated_at"))}<br/>
+                        Classification: {classification_label(assessment.get("classification", "unclear"))} | Confidence: {round(float(assessment.get("confidence", 0.0)) * 100)}%
+                    </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            selected_status = st.selectbox(
+                f"Status for {assessment.get('title', 'assessment')}",
+                DEFAULT_STATUSES,
+                index=DEFAULT_STATUSES.index(current_status) if current_status in DEFAULT_STATUSES else 0,
+                key=f"status_{assessment.get('id')}",
+                label_visibility="collapsed"
+            )
+            if selected_status != current_status:
+                update_assessment_status(assessment.get("id"), selected_status)
+                st.rerun()
+
+            action_col1, action_col2 = st.columns([2, 1])
+            with action_col1:
+                if st.button("Load Case", key=f"load_{assessment.get('id')}", use_container_width=True):
+                    load_assessment_into_workspace(assessment)
+                    st.session_state.active_assessment_id = assessment.get("id")
+                    st.session_state.assessment_title_value = assessment.get("title", "")
+                    st.session_state.pending_assessment_title = assessment.get("title", "")
+                    st.rerun()
+            with action_col2:
+                if st.button("Delete", key=f"delete_{assessment.get('id')}", use_container_width=True):
+                    delete_assessment(assessment.get("id"))
+                    if st.session_state.active_assessment_id == assessment.get("id"):
+                        reset_workspace()
+                    st.rerun()
+
+            st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if debug:
         st.markdown(
@@ -676,7 +1106,8 @@ with col2:
                     <h3>Confidence Factors</h3>
                     <div class="insight-subtle">
                         Retrieval {breakdown.get('retrieval_strength', 0):.2f}, coverage {breakdown.get('coverage', 0):.2f},
-                        decision clarity {breakdown.get('decision_clarity', 0):.2f}, citations {breakdown.get('citation_strength', 0):.2f}
+                        decision clarity {breakdown.get('decision_clarity', 0):.2f}, citations {breakdown.get('citation_strength', 0):.2f},
+                        locator quality {breakdown.get('locator_quality', 0):.2f}, consistency {breakdown.get('consistency', 0):.2f}
                     </div>
                 </div>
                 """,
@@ -729,6 +1160,10 @@ with col2:
                 st.info(source_excerpt(s.get("text", "")))
                 with st.expander("Show full excerpt", expanded=False):
                     st.write(s.get("text", ""))
+
+
+
+
 
 
 

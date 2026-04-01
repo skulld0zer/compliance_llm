@@ -34,11 +34,37 @@ VOICE_AUDIO_TERMS = {
 DEEPFAKE_TERMS = {
     "deepfake", "synthetic voice", "voice clone", "clone a voice",
     "face swap", "synthetic media", "manipulated audio", "manipulated video",
+    "generate images", "generated images", "ai image", "ai images",
+    "synthetic image", "synthetic images", "generated picture", "generated pictures",
 }
 
 DECISION_IMPACT_TERMS = {
     "decision", "decisions", "evaluate", "evaluation", "score", "ranking",
     "screening", "approve", "reject", "promotion", "termination",
+}
+
+IMAGE_TERMS = {
+    "image", "images", "picture", "pictures", "photo", "photos",
+    "portrait", "portraits", "face", "faces", "likeness",
+}
+
+MARKETING_TERMS = {
+    "marketing", "advertising", "advertisement", "campaign",
+    "promotional", "brand", "social media ad", "commercial use",
+}
+
+CONSENT_TERMS = {
+    "consent", "without consent", "permission", "without permission",
+    "authorisation", "authorization", "without approval",
+}
+
+SELF_USE_TERMS = {
+    "my own", "for myself", "personal", "my calendar", "own calendar", "my meetings",
+}
+
+CALENDAR_ASSISTANCE_TERMS = {
+    "calendar", "meetings", "meeting", "double booked", "double-booked",
+    "schedule", "scheduling", "notify me", "remind me",
 }
 
 
@@ -73,6 +99,11 @@ def analyze_question(question):
     voice_audio_matches = _contains_any(q, VOICE_AUDIO_TERMS)
     deepfake_matches = _contains_any(q, DEEPFAKE_TERMS)
     decision_impact_matches = _contains_any(q, DECISION_IMPACT_TERMS)
+    image_matches = _contains_any(q, IMAGE_TERMS)
+    marketing_matches = _contains_any(q, MARKETING_TERMS)
+    consent_matches = _contains_any(q, CONSENT_TERMS)
+    self_use_matches = _contains_any(q, SELF_USE_TERMS)
+    calendar_assistance_matches = _contains_any(q, CALENDAR_ASSISTANCE_TERMS)
 
     monitoring = bool(monitoring_matches)
     employment = bool(employment_matches)
@@ -81,6 +112,14 @@ def analyze_question(question):
     voice_or_audio = bool(voice_audio_matches)
     synthetic_media = bool(deepfake_matches)
     employment_decision_impact = bool(employment and decision_impact_matches)
+    image_generation_context = bool(image_matches and (marketing_matches or synthetic_media))
+    consent_sensitive_context = bool(consent_matches)
+    self_use_context = bool(self_use_matches)
+    personal_assistant_context = bool(self_use_context and calendar_assistance_matches and not employment)
+
+    if personal_assistant_context:
+        monitoring = False
+        monitoring_matches = []
 
     # Important nuance: plain "voice" or "audio" is not automatically biometric use.
     biometric_usage = biometric_identification or emotion_recognition
@@ -121,6 +160,36 @@ def analyze_question(question):
             synthetic_media,
             "Checks whether the system appears to generate or manipulate synthetic media such as cloned voices or deepfakes.",
             deepfake_matches,
+        ),
+        _decision_step(
+            "image_or_likeness_usage",
+            bool(image_matches),
+            "Checks whether the use case involves images, photos, faces, or personal likeness.",
+            image_matches,
+        ),
+        _decision_step(
+            "marketing_or_promotional_use",
+            bool(marketing_matches),
+            "Checks whether the use case is for marketing, advertising, or promotional content.",
+            marketing_matches,
+        ),
+        _decision_step(
+            "consent_sensitive_context",
+            consent_sensitive_context,
+            "Checks whether the description explicitly raises consent or permission concerns.",
+            consent_matches,
+        ),
+        _decision_step(
+            "self_use_context",
+            self_use_context,
+            "Checks whether the use case is framed as personal self-use rather than monitoring other people.",
+            self_use_matches,
+        ),
+        _decision_step(
+            "personal_assistant_context",
+            personal_assistant_context,
+            "Checks whether the use case looks like a personal productivity or calendar assistant for the same user.",
+            calendar_assistance_matches if self_use_context else [],
         ),
         _decision_step(
             "voice_audio_processing",
@@ -176,6 +245,24 @@ def analyze_question(question):
         if pre_classification == "unclear":
             pre_classification = "transparency_candidate"
 
+    if image_generation_context and employment:
+        hints.append(
+            "The use case involves employee images or likeness in a marketing or synthetic-media context. This does not automatically make it Annex III high-risk, but it strongly raises transparency and non-AI-law consent/privacy concerns."
+        )
+        if pre_classification == "unclear":
+            pre_classification = "transparency_candidate"
+
+    if consent_sensitive_context:
+        hints.append(
+            "The description explicitly raises consent concerns. The answer should distinguish EU AI Act obligations from separate employment, privacy, personality-rights, or data-protection issues."
+        )
+
+    if personal_assistant_context and not monitoring and not biometric_usage and not synthetic_media:
+        pre_classification = "minimal_candidate"
+        hints.append(
+            "This looks like a personal productivity assistant for the same user rather than an AI system monitoring employees or third parties, so it is likely a minimal-risk use case under the EU AI Act."
+        )
+
     if not hints:
         hints.append(
             "The description is still incomplete. Focus on whether the system monitors people, affects employment decisions, or performs biometric identification or emotion recognition."
@@ -191,6 +278,9 @@ def analyze_question(question):
 def generate_followups(decision_tree):
     questions = []
     steps = {s["step"]: s["value"] for s in decision_tree}
+
+    if steps.get("personal_assistant_context"):
+        return []
 
     if steps.get("surveillance_detected") and steps.get("employment_context"):
         questions.append(
@@ -219,6 +309,12 @@ def generate_followups(decision_tree):
 
     if not steps.get("employment_context"):
         questions.append("Is the system used in an employment, HR, or workplace context?")
+
+    if steps.get("image_or_likeness_usage") and not steps.get("marketing_or_promotional_use"):
+        questions.append("Are the generated or manipulated images used for marketing, internal communications, identification, or another purpose?")
+
+    if steps.get("image_or_likeness_usage") and not steps.get("consent_sensitive_context"):
+        questions.append("Do the affected individuals explicitly consent to the use of their image or likeness for this purpose?")
 
     if not steps.get("biometric_identification") and not steps.get("emotion_recognition"):
         questions.append(
