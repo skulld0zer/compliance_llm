@@ -137,6 +137,11 @@ data/
   index/                  FAISS index + metadata
   raw/                    Source HTML files
 
+tests/
+  test_assessment_store.py
+  test_confidence.py
+  test_decision_engine.py
+
 scripts/
   ingest.py               Builds the vector index from EU AI Act HTML
 
@@ -182,6 +187,34 @@ This generates the vector index and metadata used by the RAG pipeline.
 
 ```bash
 streamlit run ui/streamlit_app.py
+```
+
+## Development workflow
+
+This repository follows a lightweight Git-based workflow:
+
+- `main` is the stable branch
+- `dev` can be used as an integration or staging branch
+- feature work should ideally happen in short-lived branches and be merged through pull requests
+
+## Continuous integration
+
+The project includes a GitHub Actions workflow in `.github/workflows/ci.yml`.
+
+On every push or pull request to `main` or `dev`, the pipeline:
+
+- installs dependencies
+- validates Python syntax
+- runs automated `pytest` checks
+- verifies benchmark governance scenarios such as:
+  - personal calendar assistant -> minimal candidate
+  - employee monitoring -> high-risk candidate
+  - employee marketing images without consent -> transparency candidate
+
+You can run the same checks locally with:
+
+```bash
+pytest -q
 ```
 
 ## Example use cases
