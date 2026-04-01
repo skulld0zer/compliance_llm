@@ -27,6 +27,7 @@ This workspace is a prototype for exactly that use case.
 - Estimate answer confidence based on retrieval, citations, locator quality, and consistency
 - Save assessments into a lightweight governance queue
 - Re-open, review, update, and delete saved cases
+- Manage saved cases in a dedicated Review Board with sortable issue keys
 
 ## Core capabilities
 
@@ -74,7 +75,8 @@ This turns the prototype into more than a chat UI. It becomes a lightweight revi
 - `Streamlit`
 - Glass-style governance workspace UI
 - Chat interaction
-- Insights panel with confidence gauge, saved assessments, and decision flow
+- Insights panel with confidence gauge and decision flow
+- Dedicated `Review Board` view for persisted assessment cases
 
 ### Retrieval layer
 
@@ -109,9 +111,10 @@ This turns the prototype into more than a chat UI. It becomes a lightweight revi
 
 ### Persistence
 
-- saved assessments are persisted in a local SQLite database
+- saved assessments are persisted in SQLite locally
+- when `SUPABASE_DB_URL` is configured, persistence switches to Supabase Postgres
 - legacy JSON assessment data can be migrated automatically on first load
-- intended next step: move persistence to a hosted database for cloud deployments
+- issue keys are generated in the format `COMPL-XXX`
 
 ## How it works
 
@@ -172,7 +175,16 @@ Create a `.env` file in the project root:
 
 ```env
 DEEPSEEK_API_KEY=your_api_key_here
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_publishable_key
+SUPABASE_DB_URL=your_supabase_postgres_or_pooler_connection_string
 ```
+
+Notes:
+
+- `SUPABASE_DB_URL` is optional for local-only use
+- if it is set, the app will use Supabase Postgres instead of local SQLite
+- if your database password contains special characters such as `?` or `@`, encode them in the connection string
 
 ## Data preparation
 
@@ -228,18 +240,17 @@ pytest -q
 
 - This is a prototype, not a production legal advisory system.
 - Some classifications still depend on the quality of the user's description.
-- The current persistence layer is local and lightweight, not yet database-backed.
+- The current hosted persistence uses a direct database connection and is not yet hardened with a full production security model.
 - The tool supports governance decision support, not legally binding advice.
 
 ## Roadmap
 
 Planned next steps:
 
-- GitHub Actions CI/CD pipeline
-- SQL-backed persistence for saved assessments
 - stronger automated tests for rule logic and classification edge cases
 - improved answer formatting for more memo-style legal output
 - more deterministic handling of benchmark governance scenarios
+- harden Supabase/Postgres security and deployment setup
 
 ## Disclaimer
 
