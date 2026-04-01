@@ -2,7 +2,6 @@
 
 An AI governance prototype for assessing enterprise AI use cases against the EU AI Act.
 
-Live application: `Add your Streamlit link here`
 
 ## Overview
 
