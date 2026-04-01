@@ -82,6 +82,7 @@ def get_background_css():
     max-width: 70%;
     margin-left: auto;
     margin-bottom: 18px;
+    white-space: pre-line;
 }}
 
 .assistant-bubble {{
@@ -90,6 +91,7 @@ def get_background_css():
     border-radius: 20px;
     max-width: 70%;
     margin-bottom: 18px;
+    white-space: pre-line;
 }}
 
 textarea {{
@@ -172,6 +174,11 @@ def decision_step_label(step_name):
     labels = {
         "surveillance_detected": "Monitoring/Surveillance detected",
         "employment_context": "Employment context detected",
+        "employment_decision_impact": "Employment decision impact",
+        "biometric_identification": "Biometric identification",
+        "emotion_recognition": "Emotion recognition",
+        "synthetic_media_generation": "Synthetic media generation",
+        "voice_audio_processing": "Voice/audio processing",
         "biometric_usage": "Biometric data in use",
     }
     return labels.get(step_name, _pretty_step_name(step_name))
@@ -182,17 +189,14 @@ def render_decision_flow_diagram(decision_tree, classification):
         st.info("No decision flow data available.")
         return
 
-    logic_explanations = {
-        "surveillance_detected": "Checks whether monitoring keywords like monitor/track are present.",
-        "employment_context": "Checks whether an employee/worker context is present.",
-        "biometric_usage": "Checks whether biometric indicators (face/voice/emotion) are present.",
-    }
-
     for i, step in enumerate(decision_tree, start=1):
         status = "PASS" if step["value"] else "FAIL"
         color = "#16a34a" if step["value"] else "#dc2626"
         title = decision_step_label(step["step"])
-        detail = logic_explanations.get(step["step"], "Regel aus der Decision Engine.")
+        detail = step.get("detail") or "Checks a classification-relevant signal from the decision engine."
+        matches = step.get("matches") or []
+        if matches:
+            detail += f" Triggered by: {', '.join(matches[:4])}."
         st.markdown(
             f"""
             <div class="flow-card">
@@ -220,14 +224,18 @@ def render_decision_flow_diagram(decision_tree, classification):
 def format_source_meta(source):
     reference = str(source.get("reference", "Unknown")).strip() or "Unknown"
     page = str(source.get("page", "n/a")).replace("\n", " ").strip() or "n/a"
+    locator = str(source.get("locator", "")).replace("\n", " ").strip()
     paragraph = source.get("paragraph")
 
     if paragraph is None or paragraph == "":
-        paragraph = "n/a (not available in index)"
+        paragraph = "Unavailable in current index"
     else:
         paragraph = str(paragraph).replace("\n", " ").strip()
 
-    return reference, page, paragraph
+    if not locator:
+        locator = f"{reference}, paragraph {paragraph}" if paragraph != "Unavailable in current index" else reference
+
+    return reference, page, paragraph, locator
 
 
 def source_excerpt(text, max_len=320):
@@ -242,6 +250,29 @@ def source_header(reference, idx):
     if len(short_ref) > 48:
         short_ref = short_ref[:48].rstrip() + "..."
     return f"Source {idx}: {short_ref}"
+
+
+def build_followup_context(base_query, follow_up_questions, answers):
+    filled_pairs = []
+
+    for idx, question in enumerate(follow_up_questions):
+        answer = str(answers.get(idx, "")).strip()
+        if answer:
+            filled_pairs.append((question, answer))
+
+    if not filled_pairs:
+        return base_query, ""
+
+    transcript = "\n".join(
+        f"{question}\n{answer}" for question, answer in filled_pairs
+    )
+
+    combined_query = (
+        f"Original question:\n{base_query}\n\n"
+        f"Additional clarifications:\n{transcript}"
+    )
+
+    return combined_query, transcript
 
 
 # ================= STATE =================
@@ -259,6 +290,12 @@ if "answers" not in st.session_state:
 
 if "pending_query" not in st.session_state:
     st.session_state.pending_query = None
+
+if "display_query" not in st.session_state:
+    st.session_state.display_query = None
+
+if "base_query" not in st.session_state:
+    st.session_state.base_query = None
 
 
 col1, col2 = st.columns([2, 1])
@@ -279,12 +316,16 @@ with col1:
 
     if user_input:
         st.session_state.pending_query = user_input
+        st.session_state.display_query = user_input
+        st.session_state.base_query = user_input
 
     if st.session_state.pending_query:
         query = st.session_state.pending_query
+        display_query = st.session_state.display_query or query
         st.session_state.pending_query = None
+        st.session_state.display_query = None
 
-        st.session_state.messages.append({"role": "user", "content": query})
+        st.session_state.messages.append({"role": "user", "content": display_query})
 
         with st.spinner("Analyzing..."):
             results = retrieve(query)
@@ -302,10 +343,16 @@ with col1:
             except:
                 answer = {"answer": raw}
 
-            confidence = calculate_confidence(results, decision_data, raw)
+            confidence, confidence_breakdown = calculate_confidence(
+                results,
+                decision_data,
+                answer,
+                return_breakdown=True
+            )
 
             st.session_state.last_debug = {
                 "confidence": confidence,
+                "confidence_breakdown": confidence_breakdown,
                 "classification": answer.get("classification", ""),
                 "decision_tree": decision_data["decision_tree"],
                 "sources": results
@@ -330,9 +377,15 @@ with col1:
             st.session_state.answers[i] = st.text_input(q, key=f"q_{i}")
 
         if st.button("Refine Answer"):
-            combined = " ".join(st.session_state.answers.values())
+            combined, transcript = build_followup_context(
+                st.session_state.base_query or "",
+                st.session_state.follow_up,
+                st.session_state.answers
+            )
             st.session_state.pending_query = combined
+            st.session_state.display_query = transcript or combined
             st.session_state.follow_up = []
+            st.session_state.answers = {}
             st.rerun()
 
 
@@ -351,6 +404,15 @@ with col2:
         st.write(f"Decision Depth: {len(debug['decision_tree'])}")
         st.write(f"Sources Used: {len(debug['sources'])}")
         st.write(f"Evidence Strength: {round(debug['confidence'],2)}")
+        breakdown = debug.get("confidence_breakdown", {})
+        if breakdown:
+            st.caption(
+                "Confidence factors: "
+                f"retrieval {breakdown.get('retrieval_strength', 0):.2f}, "
+                f"coverage {breakdown.get('coverage', 0):.2f}, "
+                f"decision clarity {breakdown.get('decision_clarity', 0):.2f}, "
+                f"citations {breakdown.get('citation_strength', 0):.2f}"
+            )
 
         st.markdown("<div style='height:15px'></div>", unsafe_allow_html=True)
 
@@ -372,11 +434,14 @@ with col2:
 
         st.markdown("### Sources")
         for idx, s in enumerate(debug["sources"], start=1):
-            reference, page, paragraph = format_source_meta(s)
+            reference, page, paragraph, locator = format_source_meta(s)
             with st.expander(source_header(reference, idx)):
                 st.markdown(f"**Reference:** {reference}")
-                st.markdown(f"**Page:** {page}")
+                st.markdown(f"**Locator:** {locator}")
+                st.markdown(f"**Section/Page:** {page}")
                 st.markdown(f"**Paragraph:** {paragraph}")
+                if reference == "General Provision" or page == "General":
+                    st.warning("This source comes from an older index without precise legal locators. Re-run `python scripts/ingest.py` to rebuild citations with article/paragraph metadata.")
                 st.markdown("**Excerpt:**")
                 st.info(source_excerpt(s.get("text", "")))
                 with st.expander("Show full excerpt", expanded=False):

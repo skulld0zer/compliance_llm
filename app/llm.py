@@ -11,6 +11,7 @@ def generate_answer(question, context_chunks, hints, pre_classification):
     context = "\n\n".join([
         f"[{c['reference']}] {c['text']}" for c in context_chunks
     ])
+    decision_guidance = "\n".join([f"- {hint}" for hint in hints]) if hints else "- No additional rule hints."
 
     prompt = f"""
 You are an EU AI Act classification assistant.
@@ -37,6 +38,17 @@ BAD follow-ups:
 - What oversight measures are required?
 
 ---
+
+Decision engine pre-classification:
+{pre_classification}
+
+Decision engine hints:
+{decision_guidance}
+
+Important interpretation guardrails:
+- Do not treat general voice or audio processing alone as biometric identification.
+- Distinguish synthetic media generation/manipulation from biometric identification or emotion recognition.
+- If the use case is ambiguous, explain what is known, what is uncertain, and ask only the missing classification-critical question(s).
 
 Context:
 {context}

@@ -23,6 +23,8 @@ def retrieve(query, top_k=5):
             "page": metadata[i]["page"],
             "paragraph": metadata[i].get("paragraph"),
             "reference": metadata[i].get("reference", "Unknown"),
+            "locator": metadata[i].get("locator", ""),
+            "chunk": metadata[i].get("chunk"),
             "score": float(D[0][idx]) if len(D[0]) > idx else 0.0
         })
 
