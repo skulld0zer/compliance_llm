@@ -1,5 +1,6 @@
 import sys
 import os
+import base64
 import streamlit as st
 import json
 import re
@@ -19,39 +20,61 @@ from app.confidence import calculate_confidence
 # ================= STYLE =================
 st.set_page_config(layout="wide")
 
-st.markdown("""
+def get_background_css():
+    assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+    candidates = [
+        ("background.jpg", "image/jpeg"),
+        ("background.jpeg", "image/jpeg"),
+        ("background.png", "image/png"),
+        ("background.webp", "image/webp"),
+    ]
+
+    background = "linear-gradient(135deg, #a7d8ef 0%, #d9eef8 50%, #f5fbff 100%)"
+
+    for filename, mime_type in candidates:
+        asset_path = os.path.join(assets_dir, filename)
+        if os.path.exists(asset_path):
+            with open(asset_path, "rb") as img_file:
+                encoded = base64.b64encode(img_file.read()).decode("utf-8")
+            background = f'url("data:{mime_type};base64,{encoded}")'
+            break
+
+    return f"""
 <style>
-.stApp { background: none; }
+.stApp {{ background: none; }}
 
-body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background: url("https://i.ibb.co/yzj7dwz/vivid-blurred-colorful-wallpaper-background.jpg");
+[data-testid="stAppViewContainer"] {{
+    background-image: {background};
     background-size: cover;
-    opacity: 0.5;
-    z-index: -10;
-}
+    background-position: center;
+    background-attachment: fixed;
+}}
 
-body::after {
+[data-testid="stAppViewContainer"]::before {{
     content: "";
     position: fixed;
     inset: 0;
     backdrop-filter: blur(10px);
     background: rgba(255,255,255,0.25);
-    z-index: -9;
-}
+    pointer-events: none;
+    z-index: 0;
+}}
 
-.header-box {
+[data-testid="stAppViewContainer"] > .main {{
+    position: relative;
+    z-index: 1;
+}}
+
+.header-box {{
     backdrop-filter: blur(20px);
     background: rgba(255,255,255,0.6);
     border-radius: 20px;
     padding: 16px 20px;
     margin-bottom: 20px;
-}
+}}
 
-/* 🔥 SPACING FIXES */
-.user-bubble {
+/* spacing fixes */
+.user-bubble {{
     background: #007AFF;
     color: white;
     padding: 12px 18px;
@@ -59,45 +82,47 @@ body::after {
     max-width: 70%;
     margin-left: auto;
     margin-bottom: 18px;
-}
+}}
 
-.assistant-bubble {
+.assistant-bubble {{
     background: rgba(255,255,255,0.9);
     padding: 12px 18px;
     border-radius: 20px;
     max-width: 70%;
     margin-bottom: 18px;
-}
+}}
 
-textarea {
+textarea {{
     border-radius: 20px !important;
     background: rgba(255,255,255,0.9) !important;
-}
+}}
 
-/* headings tighter */
-h3 {
+h3 {{
     margin-bottom: 6px !important;
-}
+}}
 
-.flow-card {
+.flow-card {{
     background: rgba(255,255,255,0.7);
     border: 1px solid rgba(15,23,42,0.15);
     border-radius: 12px;
     padding: 10px 12px;
     margin-bottom: 8px;
-}
+}}
 
-.flow-step-title {
+.flow-step-title {{
     font-weight: 600;
     margin-bottom: 4px;
-}
+}}
 
-.flow-meta {
+.flow-meta {{
     font-size: 0.9rem;
     color: #334155;
-}
+}}
 </style>
-""", unsafe_allow_html=True)
+"""
+
+
+st.markdown(get_background_css(), unsafe_allow_html=True)
 
 
 # ================= HELPERS =================
@@ -356,4 +381,6 @@ with col2:
                 st.info(source_excerpt(s.get("text", "")))
                 with st.expander("Show full excerpt", expanded=False):
                     st.write(s.get("text", ""))
+
+
 
