@@ -207,18 +207,6 @@ Planned next steps:
 - improved answer formatting for more memo-style legal output
 - more deterministic handling of benchmark governance scenarios
 
-## Why this is a strong portfolio project
-
-This project is not just a chat interface. It demonstrates:
-
-- AI product thinking
-- LLM integration with structured outputs
-- retrieval-augmented generation over legal text
-- explainable rule-based decision support
-- confidence scoring and evidence traceability
-- human-in-the-loop governance workflow design
-- enterprise-oriented framing for AI adoption and oversight
-
 ## Disclaimer
 
 This project is for prototyping, learning, and portfolio purposes. It does not provide legal advice and should not be used as a substitute for formal legal review.
