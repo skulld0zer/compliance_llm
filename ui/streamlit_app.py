@@ -164,17 +164,62 @@ h3 {{
 }}
 
 .followup-shell details {{
-    background: rgba(166, 228, 255, 0.18);
-    border: 1px solid rgba(56, 189, 248, 0.28);
-    border-radius: 18px;
-    box-shadow: 0 18px 45px rgba(56, 189, 248, 0.08);
+    background: linear-gradient(180deg, rgba(255,255,255,0.68), rgba(255,255,255,0.38));
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 24px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
     overflow: hidden;
 }}
 
 .followup-shell details summary {{
-    background: rgba(117, 214, 255, 0.14);
-    font-weight: 700;
+    background: rgba(166, 228, 255, 0.18);
+    font-weight: 800;
     letter-spacing: 0.01em;
+    color: #0f172a;
+}}
+
+.followup-shell details summary p {{
+    font-weight: 800 !important;
+}}
+
+.followup-shell [data-testid="stExpanderDetails"] {{
+    background: linear-gradient(180deg, rgba(166, 228, 255, 0.18), rgba(255,255,255,0.18));
+    padding-top: 0.5rem;
+}}
+
+.sources-shell {{
+    padding: 0 0 2px 0;
+}}
+
+.sources-shell .source-item {{
+    background: rgba(255,255,255,0.34);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 18px;
+    overflow: hidden;
+    margin-bottom: 12px;
+}}
+
+.sources-shell .source-item [data-testid="stExpander"] {{
+    border: none;
+    background: transparent;
+}}
+
+.sources-shell .source-item details {{
+    background: transparent;
+    border: none;
+}}
+
+.sources-shell .source-item summary {{
+    font-weight: 800;
+    color: #0f172a;
+}}
+
+.sources-shell .source-item [data-testid="stExpanderDetails"] {{
+    background: rgba(255,255,255,0.12);
+}}
+
+.sources-shell .source-body {{
+    padding: 2px 4px 2px 4px;
 }}
 
 .insight-card {{
@@ -563,7 +608,6 @@ with col1:
     # ================= FOLLOW UPS =================
     if st.session_state.follow_up:
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-        st.markdown('<div class="followup-shell">', unsafe_allow_html=True)
         with st.expander("Follow-up Questions for Refinement", expanded=False):
             for i, q in enumerate(st.session_state.follow_up):
                 st.markdown(f'<div class="followup-question">{q}</div>', unsafe_allow_html=True)
@@ -595,7 +639,6 @@ with col1:
                 })
                 st.session_state.processing = True
                 st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ================= INSIGHTS =================
@@ -664,10 +707,6 @@ with col2:
         )
         with st.expander("Show Decision Flow Diagram", expanded=False):
             render_decision_flow_diagram(debug["decision_tree"], debug["classification"])
-
-        for step in debug["decision_tree"]:
-            icon = "PASS" if step["value"] else "FAIL"
-            st.write(f"{icon}: {decision_step_label(step['step'])}")
 
         st.markdown(
             """
