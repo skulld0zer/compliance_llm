@@ -47,6 +47,7 @@ def test_upsert_update_and_delete_assessment(monkeypatch):
         assert len(loaded) == 1
         assert loaded[0]["title"] == "Employee monitoring case"
         assert loaded[0]["id"] == saved["id"]
+        assert loaded[0]["issue_key"] == "COMPL-001"
 
         assessment_store.update_assessment_status(saved["id"], "In Review")
         updated = assessment_store.load_assessments()
@@ -71,6 +72,7 @@ def test_legacy_json_is_migrated_to_sqlite(monkeypatch):
             [
               {
                 "id": "legacy-1",
+                "issue_key": "COMPL-009",
                 "title": "Legacy assessment",
                 "status": "Draft",
                 "classification": "minimal",
@@ -93,6 +95,7 @@ def test_legacy_json_is_migrated_to_sqlite(monkeypatch):
         assert len(loaded) == 1
         assert loaded[0]["id"] == "legacy-1"
         assert loaded[0]["title"] == "Legacy assessment"
+        assert loaded[0]["issue_key"] == "COMPL-009"
     finally:
         if assessment_store._MEMORY_CONNECTION is not None:
             assessment_store._MEMORY_CONNECTION.close()

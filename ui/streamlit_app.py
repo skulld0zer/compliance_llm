@@ -1,10 +1,12 @@
 import sys
 import os
 import base64
+import html
 import streamlit as st
 import json
 import re
 from datetime import datetime
+import plotly.graph_objects as go
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -404,6 +406,148 @@ h3 {{
     color: #047857;
 }}
 
+.workspace-nav {{
+    display: flex;
+    gap: 10px;
+    margin: 6px 0 18px 0;
+}}
+
+.workspace-pill {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.52);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    color: #0f172a;
+    font-weight: 700;
+    box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
+}}
+
+.page-shell {{
+    animation-duration: 0.55s;
+    animation-fill-mode: both;
+    animation-timing-function: ease;
+}}
+
+.view-enter-chat {{
+    animation-name: chatEnter;
+}}
+
+.view-enter-dashboard {{
+    animation-name: dashboardEnter;
+}}
+
+@keyframes chatEnter {{
+    from {{
+        opacity: 0;
+        transform: translateX(-24px) scale(0.99);
+    }}
+    to {{
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }}
+}}
+
+@keyframes dashboardEnter {{
+    from {{
+        opacity: 0;
+        transform: translateX(24px) scale(0.99);
+    }}
+    to {{
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }}
+}}
+
+.dashboard-table {{
+    background: linear-gradient(180deg, rgba(255,255,255,0.7), rgba(255,255,255,0.42));
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 22px;
+    padding: 8px 12px 8px 12px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}}
+
+.dashboard-row {{
+    display: grid;
+    grid-template-columns: 0.9fr 3.1fr 1.05fr 1fr 1.35fr 0.95fr;
+    gap: 14px;
+    align-items: center;
+    padding: 12px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}}
+
+.dashboard-row:last-child {{
+    border-bottom: none;
+}}
+
+.dashboard-head {{
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #587082;
+    font-weight: 800;
+    padding-top: 4px;
+    padding-bottom: 8px;
+}}
+
+.dashboard-cell-title {{
+    color: #0f172a;
+    font-weight: 700;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}}
+
+.dashboard-cell-subtle {{
+    color: #587082;
+    font-size: 0.9rem;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}}
+
+.dashboard-actions {{
+    padding: 0 10px 12px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}}
+
+.dashboard-actions:last-child {{
+    border-bottom: none;
+}}
+
+.issue-key {{
+    color: #2563eb;
+    font-weight: 800;
+    font-size: 0.92rem;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}}
+
+.dashboard-toolbar {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 8px 0 12px 0;
+}}
+
+.dashboard-toolbar-copy {{
+    color: #587082;
+    font-size: 0.95rem;
+}}
+
+.dashboard-title-cell {{
+    min-width: 0;
+}}
+
+.dashboard-header-buttons {{
+    margin-bottom: 8px;
+}}
+
 @keyframes insightEnter {{
     from {{
         opacity: 0;
@@ -671,9 +815,88 @@ def format_saved_timestamp(timestamp):
 
     try:
         dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        return dt.strftime("%d %b %Y, %H:%M")
+        return dt.strftime("%d %b %y")
     except ValueError:
         return timestamp
+
+
+def sort_assessments(items, sort_by, sort_dir):
+    reverse = sort_dir == "desc"
+
+    def sort_key(item):
+        if sort_by == "issue_key":
+            return str(item.get("issue_key", "")).lower()
+        if sort_by == "title":
+            return str(item.get("title", "")).lower()
+        if sort_by == "status":
+            return DEFAULT_STATUSES.index(item.get("status")) if item.get("status") in DEFAULT_STATUSES else 99
+        if sort_by == "confidence":
+            return float(item.get("confidence", 0.0) or 0.0)
+        if sort_by == "classification":
+            return str(item.get("classification", "")).lower()
+        return str(item.get("updated_at", ""))
+
+    return sorted(items, key=sort_key, reverse=reverse)
+
+
+def toggle_dashboard_sort(sort_by):
+    current_by = st.session_state.dashboard_sort_by
+    current_dir = st.session_state.dashboard_sort_dir
+
+    if current_by == sort_by:
+        st.session_state.dashboard_sort_dir = "asc" if current_dir == "desc" else "desc"
+    else:
+        st.session_state.dashboard_sort_by = sort_by
+        st.session_state.dashboard_sort_dir = "asc" if sort_by == "title" else "desc"
+
+
+def dashboard_sort_label(label, sort_key):
+    active = st.session_state.dashboard_sort_by == sort_key
+    if not active:
+        return label
+    arrow = "↓" if st.session_state.dashboard_sort_dir == "desc" else "↑"
+    return f"{label} {arrow}"
+
+
+def render_pie_chart(title, labels, values, colors):
+    filtered = [(label, value, colors[idx]) for idx, (label, value) in enumerate(zip(labels, values)) if value > 0]
+    if not filtered:
+        st.markdown(
+            f"""
+            <div class="insight-card">
+                <h3>{title}</h3>
+                <div class="insight-subtle">No data yet.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    labels = [item[0] for item in filtered]
+    values = [item[1] for item in filtered]
+    colors = [item[2] for item in filtered]
+
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.58,
+                marker={"colors": colors},
+                textinfo="label+percent",
+                sort=False,
+            )
+        ]
+    )
+    fig.update_layout(
+        title={"text": title, "x": 0.02, "xanchor": "left"},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin={"l": 10, "r": 10, "t": 48, "b": 10},
+        font={"color": "#0f172a"},
+        showlegend=False,
+    )
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
 def build_assessment_record(title_override=None, status="Draft"):
@@ -683,8 +906,8 @@ def build_assessment_record(title_override=None, status="Draft"):
 
     user_messages = [msg for msg in st.session_state.messages if msg.get("role") == "user" and not msg.get("typing")]
     last_user_message = user_messages[-1]["content"] if user_messages else "Untitled assessment"
-
-    title = title_override.strip() if title_override and title_override.strip() else last_user_message[:80]
+    base_title = (st.session_state.base_query or last_user_message or "Untitled assessment").strip()
+    title = title_override.strip() if title_override and title_override.strip() else base_title[:120]
 
     existing_status = status
     if st.session_state.active_assessment_id:
@@ -744,6 +967,158 @@ def reset_workspace():
     st.session_state.pending_assessment_title = ""
 
 
+def render_dashboard_view(assessments):
+    st.markdown('<div class="page-shell view-enter-dashboard">', unsafe_allow_html=True)
+    st.markdown('<div class="header-box"><h2>Review Board</h2></div>', unsafe_allow_html=True)
+
+    nav_col1, nav_col2 = st.columns([1, 3.5])
+    with nav_col1:
+        if st.button("Back to Workspace", width="stretch"):
+            st.session_state.view_mode = "chat"
+            st.rerun()
+    with nav_col2:
+        st.markdown(
+            '<div class="dashboard-toolbar-copy">Review and manage persisted assessment cases with sortable issue keys and workflow status.</div>',
+            unsafe_allow_html=True
+        )
+
+    total_assessments = len(assessments)
+    in_review_count = sum(1 for item in assessments if item.get("status") == "In Review")
+    approved_count = sum(1 for item in assessments if item.get("status") == "Approved")
+    avg_confidence = (
+        sum(float(item.get("confidence", 0.0) or 0.0) for item in assessments) / total_assessments
+        if total_assessments else 0.0
+    )
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    for col, label, value in [
+        (kpi1, "Total Cases", total_assessments),
+        (kpi2, "In Review", in_review_count),
+        (kpi3, "Approved", approved_count),
+        (kpi4, "Average Confidence", f"{round(avg_confidence * 100)}%"),
+    ]:
+        with col:
+            st.markdown(
+                f"""
+                <div class="governance-card">
+                    <div class="kpi-label">{label}</div>
+                    <div class="kpi-value">{value}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    chart_col1, chart_col2, chart_col3 = st.columns([1.1, 1.1, 1])
+    with chart_col1:
+        render_pie_chart(
+            "Cases by Status",
+            DEFAULT_STATUSES,
+            [sum(1 for item in assessments if item.get("status") == status) for status in DEFAULT_STATUSES],
+            ["#60a5fa", "#f59e0b", "#a855f7", "#10b981"],
+        )
+    with chart_col2:
+        render_pie_chart(
+            "Cases by Classification",
+            ["High Risk", "Transparency", "Minimal", "Needs More Input"],
+            [
+                sum(1 for item in assessments if normalize_classification(item.get("classification")) == "high-risk"),
+                sum(1 for item in assessments if normalize_classification(item.get("classification")) == "transparency"),
+                sum(1 for item in assessments if normalize_classification(item.get("classification")) == "minimal"),
+                sum(1 for item in assessments if normalize_classification(item.get("classification")) == "unclear"),
+            ],
+            ["#ff5f8f", "#5c7cff", "#20d3c2", "#cbd5e1"],
+        )
+    with chart_col3:
+        render_gauge(avg_confidence)
+
+    st.markdown('<div class="dashboard-table">', unsafe_allow_html=True)
+    st.markdown('<div class="dashboard-header-buttons">', unsafe_allow_html=True)
+    head_cols = st.columns([0.9, 3.1, 1.05, 1, 1.35, 0.95])
+    header_defs = [
+        ("Issue", "issue_key"),
+        ("Title", "title"),
+        ("Status", "status"),
+        ("Confidence", "confidence"),
+        ("Classification", "classification"),
+        ("Updated", "updated_at"),
+    ]
+    for col, (label, sort_key) in zip(head_cols, header_defs):
+        with col:
+            if st.button(dashboard_sort_label(label, sort_key), key=f"sort_{sort_key}", width="stretch"):
+
+                toggle_dashboard_sort(sort_key)
+                st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+    sorted_assessments = sort_assessments(
+        assessments,
+        st.session_state.dashboard_sort_by,
+        st.session_state.dashboard_sort_dir,
+    )
+
+    if not sorted_assessments:
+        st.markdown(
+            """
+            <div class="dashboard-row">
+                <div class="dashboard-cell-subtle">No saved assessments yet.</div>
+                <div></div><div></div><div></div><div></div><div></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        for assessment in sorted_assessments:
+            status = assessment.get("status", "Draft")
+            confidence = round(float(assessment.get("confidence", 0.0) or 0.0) * 100)
+            classification = html.escape(classification_label(assessment.get("classification", "unclear")))
+            title = html.escape(assessment.get("title", "Untitled assessment"))
+            issue_key = html.escape(assessment.get("issue_key", ""))
+            st.markdown(
+                f"""
+                <div class="dashboard-row">
+                    <div class="issue-key">{issue_key}</div>
+                    <div class="dashboard-title-cell">
+                        <div class="dashboard-cell-title">{title}</div>
+                    </div>
+                    <div><span class="status-badge status-{status_class(status)}">{status}</span></div>
+                    <div class="dashboard-cell-title">{confidence}%</div>
+                    <div class="dashboard-cell-subtle">{classification}</div>
+                    <div class="dashboard-cell-subtle">{format_saved_timestamp(assessment.get("updated_at"))}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            action_col1, action_col2, action_col3 = st.columns([1.05, 1.05, 0.8])
+            with action_col1:
+                selected_status = st.selectbox(
+                    f"Queue status for {assessment.get('id')}",
+                    DEFAULT_STATUSES,
+                    index=DEFAULT_STATUSES.index(status) if status in DEFAULT_STATUSES else 0,
+                    key=f"queue_status_{assessment.get('id')}",
+                    label_visibility="collapsed",
+                )
+                if selected_status != status:
+                    update_assessment_status(assessment.get("id"), selected_status)
+                    st.rerun()
+            with action_col2:
+                if st.button("Open", key=f"queue_open_{assessment.get('id')}", width="stretch"):
+
+                    load_assessment_into_workspace(assessment)
+                    st.session_state.active_assessment_id = assessment.get("id")
+                    st.session_state.pending_assessment_title = assessment.get("title", "")
+                    st.session_state.view_mode = "chat"
+                    st.rerun()
+            with action_col3:
+                if st.button("Delete", key=f"queue_delete_{assessment.get('id')}", width="stretch"):
+
+                    delete_assessment(assessment.get("id"))
+                    if st.session_state.active_assessment_id == assessment.get("id"):
+                        reset_workspace()
+                    st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 # ================= STATE =================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -787,6 +1162,15 @@ if "active_assessment_id" not in st.session_state:
 if "pending_assessment_title" not in st.session_state:
     st.session_state.pending_assessment_title = None
 
+if "view_mode" not in st.session_state:
+    st.session_state.view_mode = "chat"
+
+if "dashboard_sort_by" not in st.session_state:
+    st.session_state.dashboard_sort_by = "updated_at"
+
+if "dashboard_sort_dir" not in st.session_state:
+    st.session_state.dashboard_sort_dir = "desc"
+
 if st.session_state.pending_assessment_title is not None:
     st.session_state.assessment_title_value = st.session_state.pending_assessment_title
     st.session_state.assessment_title_input = st.session_state.pending_assessment_title
@@ -795,11 +1179,25 @@ if st.session_state.pending_assessment_title is not None:
 
 assessments = load_assessments()
 
+if st.session_state.view_mode == "dashboard":
+    render_dashboard_view(assessments)
+    st.stop()
+
 col1, col2 = st.columns([2, 1])
 
 
 # ================= CHAT =================
 with col1:
+    nav_col1, nav_col2 = st.columns([1.4, 4])
+    with nav_col1:
+        if st.button("Review Board", width="stretch"):
+
+            st.session_state.view_mode = "dashboard"
+            st.rerun()
+    with nav_col2:
+        st.markdown('<div class="workspace-pill">Live governance workspace</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="page-shell view-enter-chat">', unsafe_allow_html=True)
     st.markdown('<div class="header-box"><h2>EU AI Act Governance Workspace</h2></div>', unsafe_allow_html=True)
 
     for msg in st.session_state.messages:
@@ -970,7 +1368,8 @@ with col1:
         st.session_state.assessment_title_value = title_value
         save_col, new_case_col, info_col = st.columns([1, 1, 1])
         with save_col:
-            if st.button("Save Current Assessment", use_container_width=True):
+            if st.button("Save Current Assessment", width="stretch"):
+
                 record = build_assessment_record(st.session_state.assessment_title_value, status="Draft")
                 if record:
                     saved = upsert_assessment(record)
@@ -980,7 +1379,8 @@ with col1:
                     st.success("Assessment saved to governance queue.")
                     st.rerun()
         with new_case_col:
-            if st.button("Create New Case", use_container_width=True):
+            if st.button("Create New Case", width="stretch"):
+
                 reset_workspace()
                 st.session_state.pending_assessment_title = ""
                 st.rerun()
@@ -988,6 +1388,7 @@ with col1:
             active_label = st.session_state.active_assessment_id or "Not saved yet"
             st.caption(f"Active case ID: {active_label}")
         st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ================= INSIGHTS =================
@@ -1027,55 +1428,6 @@ with col2:
         unsafe_allow_html=True
     )
 
-    st.markdown('<div class="governance-card">', unsafe_allow_html=True)
-    st.markdown("### Saved Assessments")
-    if not assessments:
-        st.caption("No saved assessments yet. Save the current workspace state to start a governance queue.")
-    else:
-        for assessment in assessments[:6]:
-            current_status = assessment.get("status", "Draft")
-            badge_class = status_class(current_status)
-            st.markdown(
-                f"""
-                <div class="case-card">
-                    <div class="status-badge status-{badge_class}">{current_status}</div>
-                    <div class="case-title">{assessment.get("title", "Untitled assessment")}</div>
-                    <div class="case-meta">
-                        Updated {format_saved_timestamp(assessment.get("updated_at"))}<br/>
-                        Classification: {classification_label(assessment.get("classification", "unclear"))} | Confidence: {round(float(assessment.get("confidence", 0.0)) * 100)}%
-                    </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-            selected_status = st.selectbox(
-                f"Status for {assessment.get('title', 'assessment')}",
-                DEFAULT_STATUSES,
-                index=DEFAULT_STATUSES.index(current_status) if current_status in DEFAULT_STATUSES else 0,
-                key=f"status_{assessment.get('id')}",
-                label_visibility="collapsed"
-            )
-            if selected_status != current_status:
-                update_assessment_status(assessment.get("id"), selected_status)
-                st.rerun()
-
-            action_col1, action_col2 = st.columns([2, 1])
-            with action_col1:
-                if st.button("Load Case", key=f"load_{assessment.get('id')}", use_container_width=True):
-                    load_assessment_into_workspace(assessment)
-                    st.session_state.active_assessment_id = assessment.get("id")
-                    st.session_state.assessment_title_value = assessment.get("title", "")
-                    st.session_state.pending_assessment_title = assessment.get("title", "")
-                    st.rerun()
-            with action_col2:
-                if st.button("Delete", key=f"delete_{assessment.get('id')}", use_container_width=True):
-                    delete_assessment(assessment.get("id"))
-                    if st.session_state.active_assessment_id == assessment.get("id"):
-                        reset_workspace()
-                    st.rerun()
-
-            st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
     if debug:
         st.markdown(

@@ -42,10 +42,15 @@ def calculate_confidence(results, decision_data, answer, return_breakdown=False)
 
     steps = decision_data.get("decision_tree", []) if isinstance(decision_data, dict) else []
     if steps:
-        true_ratio = sum(1 for step in steps if step.get("value")) / len(steps)
-        decision_clarity = 0.35 + (0.65 * true_ratio)
+        true_count = sum(1 for step in steps if step.get("value"))
+        pre_classification = str(decision_data.get("pre_classification", "")) if isinstance(decision_data, dict) else ""
+        if pre_classification in {"high_risk_candidate", "potential_high_risk", "transparency_candidate", "minimal_candidate"}:
+            decision_clarity = 0.72 + min(true_count, 4) * 0.06
+        else:
+            true_ratio = true_count / len(steps)
+            decision_clarity = 0.45 + (0.45 * true_ratio)
     else:
-        decision_clarity = 0.35
+        decision_clarity = 0.4
     decision_clarity = _clamp(decision_clarity)
 
     answer_text = _answer_text(answer)
@@ -71,7 +76,7 @@ def calculate_confidence(results, decision_data, answer, return_breakdown=False)
             answer_classification = ""
 
     consistency_score = 0.55
-    if pre_classification == "high_risk_candidate" and answer_classification == "high-risk":
+    if pre_classification in {"high_risk_candidate", "potential_high_risk", "sensitive_prohibited_or_high_risk_candidate"} and answer_classification == "high-risk":
         consistency_score = 1.0
     elif pre_classification == "transparency_candidate" and answer_classification == "transparency":
         consistency_score = 1.0
