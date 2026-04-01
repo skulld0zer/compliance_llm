@@ -109,8 +109,9 @@ This turns the prototype into more than a chat UI. It becomes a lightweight revi
 
 ### Persistence
 
-- current version uses a lightweight local JSON store for saved assessments
-- intended next step: migrate assessment persistence to a real SQL-backed store
+- saved assessments are persisted in a local SQLite database
+- legacy JSON assessment data can be migrated automatically on first load
+- intended next step: move persistence to a hosted database for cloud deployments
 
 ## How it works
 

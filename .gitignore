@@ -5,3 +5,4 @@ data/index/
 data/processed/
 *.faiss
 *.pkl
+*.db
