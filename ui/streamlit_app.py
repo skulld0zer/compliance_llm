@@ -1399,7 +1399,6 @@ with col1:
                 record = build_assessment_record(st.session_state.assessment_title_value, status="Draft")
                 if record:
                     saved = upsert_assessment(record)
-                    refresh_assessments()
                     st.session_state.active_assessment_id = saved.get("id")
                     st.session_state.assessment_title_value = saved.get("title", "")
                     st.session_state.pending_assessment_title = saved.get("title", "")

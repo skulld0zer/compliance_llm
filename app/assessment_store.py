@@ -20,6 +20,7 @@ DEFAULT_STATUSES = ["Draft", "Needs More Info", "In Review", "Approved"]
 _MEMORY_CONNECTION = None
 POSTGRES_CONNECT_TIMEOUT_SECONDS = 5
 POSTGRES_DISABLE_SECONDS = 300
+POSTGRES_STATEMENT_TIMEOUT_MS = 5000
 _POSTGRES_DISABLED_UNTIL = 0.0
 _LAST_STORAGE_BACKEND = "sqlite"
 _LAST_POSTGRES_ERROR = ""
@@ -62,6 +63,11 @@ def _postgres_connect():
             row_factory=dict_row,
             connect_timeout=POSTGRES_CONNECT_TIMEOUT_SECONDS,
             sslmode="require",
+            options=(
+                f"-c statement_timeout={POSTGRES_STATEMENT_TIMEOUT_MS} "
+                f"-c lock_timeout={POSTGRES_STATEMENT_TIMEOUT_MS} "
+                f"-c idle_in_transaction_session_timeout={POSTGRES_STATEMENT_TIMEOUT_MS}"
+            ),
         )
     except Exception as exc:
         _LAST_POSTGRES_ERROR = str(exc)
