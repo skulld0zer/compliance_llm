@@ -918,7 +918,7 @@ def build_assessment_record(title_override=None, status="Draft"):
 
     existing_status = status
     if st.session_state.active_assessment_id:
-        current_cases = get_assessments_cached()
+        current_cases = safe_get_assessments()
         existing = next((item for item in current_cases if item.get("id") == st.session_state.active_assessment_id), None)
         if existing and existing.get("status"):
             existing_status = existing["status"]
@@ -948,6 +948,14 @@ def get_assessments_cached():
 def refresh_assessments():
     get_assessments_cached.clear()
     return get_assessments_cached()
+
+
+def safe_get_assessments():
+    try:
+        return get_assessments_cached()
+    except Exception as exc:
+        append_debug_event(f"Assessment load failed: {exc}")
+        return []
 
 
 def load_assessment_into_workspace(assessment):
@@ -1210,11 +1218,10 @@ if st.session_state.pending_assessment_title is not None:
     st.session_state.pending_assessment_title = None
 
 
-assessments = get_assessments_cached()
 storage_diagnostics = get_storage_diagnostics()
 
 if st.session_state.view_mode == "dashboard":
-    render_dashboard_view(assessments)
+    render_dashboard_view(safe_get_assessments())
     st.stop()
 
 col1, col2 = st.columns([2, 1])
@@ -1468,6 +1475,7 @@ with col2:
         else:
             st.caption("No debug events yet.")
 
+    assessments = safe_get_assessments()
     debug = st.session_state.last_debug
     total_assessments = len(assessments)
     in_review_count = sum(1 for item in assessments if item.get("status") == "In Review")
