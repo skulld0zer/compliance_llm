@@ -21,6 +21,8 @@ _MEMORY_CONNECTION = None
 POSTGRES_CONNECT_TIMEOUT_SECONDS = 5
 POSTGRES_DISABLE_SECONDS = 300
 _POSTGRES_DISABLED_UNTIL = 0.0
+_LAST_STORAGE_BACKEND = "sqlite"
+_LAST_POSTGRES_ERROR = ""
 
 
 def _is_postgres():
@@ -29,6 +31,16 @@ def _is_postgres():
         and DB_PATH != ":memory:"
         and time.time() >= _POSTGRES_DISABLED_UNTIL
     )
+
+
+def get_storage_diagnostics():
+    fallback_remaining = max(0, int(_POSTGRES_DISABLED_UNTIL - time.time()))
+    return {
+        "backend": _LAST_STORAGE_BACKEND,
+        "postgres_configured": bool(SUPABASE_DB_URL),
+        "postgres_retry_in_seconds": fallback_remaining,
+        "last_postgres_error": _LAST_POSTGRES_ERROR,
+    }
 
 
 def _sqlite_connect():
@@ -41,7 +53,7 @@ def _sqlite_connect():
 
 
 def _postgres_connect():
-    global _POSTGRES_DISABLED_UNTIL
+    global _POSTGRES_DISABLED_UNTIL, _LAST_POSTGRES_ERROR
     if psycopg is None:
         raise RuntimeError("psycopg is required for Supabase/Postgres connections.")
     try:
@@ -51,19 +63,24 @@ def _postgres_connect():
             connect_timeout=POSTGRES_CONNECT_TIMEOUT_SECONDS,
             sslmode="require",
         )
-    except Exception:
+    except Exception as exc:
+        _LAST_POSTGRES_ERROR = str(exc)
         _POSTGRES_DISABLED_UNTIL = time.time() + POSTGRES_DISABLE_SECONDS
         raise
 
 
 def _connect():
+    global _LAST_STORAGE_BACKEND
     if _is_postgres():
         try:
-            return _postgres_connect()
+            conn = _postgres_connect()
+            _LAST_STORAGE_BACKEND = "postgres"
+            return conn
         except Exception:
             pass
     conn = _sqlite_connect()
     conn.row_factory = sqlite3.Row
+    _LAST_STORAGE_BACKEND = "sqlite"
     return conn
 
 

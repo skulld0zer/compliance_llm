@@ -17,7 +17,7 @@ from app.rag_pipeline import retrieve
 from app.decision_engine import analyze_question, generate_followups
 from app.llm import generate_answer
 from app.confidence import calculate_confidence
-from app.assessment_store import DEFAULT_STATUSES, delete_assessment, load_assessments, upsert_assessment, update_assessment_status
+from app.assessment_store import DEFAULT_STATUSES, delete_assessment, get_storage_diagnostics, load_assessments, upsert_assessment, update_assessment_status
 
 
 # ================= STYLE =================
@@ -980,6 +980,16 @@ def reset_workspace():
 def render_dashboard_view(assessments):
     st.markdown('<div class="page-shell view-enter-dashboard">', unsafe_allow_html=True)
     st.markdown('<div class="header-box"><h2>Review Board</h2></div>', unsafe_allow_html=True)
+    storage_label = "Postgres" if storage_diagnostics.get("backend") == "postgres" else "SQLite Fallback"
+    storage_note = f"Storage backend: {storage_label}"
+    if storage_diagnostics.get("backend") != "postgres" and storage_diagnostics.get("postgres_configured"):
+        retry_seconds = storage_diagnostics.get("postgres_retry_in_seconds", 0)
+        last_error = storage_diagnostics.get("last_postgres_error", "")
+        if retry_seconds:
+            storage_note += f" | retry in about {retry_seconds}s"
+        if last_error:
+            storage_note += f" | last Postgres error: {last_error}"
+    st.caption(storage_note)
 
     nav_col1, nav_col2 = st.columns([1, 3.5])
     with nav_col1:
@@ -1190,6 +1200,7 @@ if st.session_state.pending_assessment_title is not None:
 
 
 assessments = get_assessments_cached()
+storage_diagnostics = get_storage_diagnostics()
 
 if st.session_state.view_mode == "dashboard":
     render_dashboard_view(assessments)
