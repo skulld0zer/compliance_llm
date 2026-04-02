@@ -911,7 +911,7 @@ def build_assessment_record(title_override=None, status="Draft"):
 
     existing_status = status
     if st.session_state.active_assessment_id:
-        current_cases = load_assessments()
+        current_cases = get_assessments_cached()
         existing = next((item for item in current_cases if item.get("id") == st.session_state.active_assessment_id), None)
         if existing and existing.get("status"):
             existing_status = existing["status"]
@@ -931,6 +931,16 @@ def build_assessment_record(title_override=None, status="Draft"):
             ""
         ),
     }
+
+
+@st.cache_data(show_spinner=False, ttl=10)
+def get_assessments_cached():
+    return load_assessments()
+
+
+def refresh_assessments():
+    get_assessments_cached.clear()
+    return get_assessments_cached()
 
 
 def load_assessment_into_workspace(assessment):
@@ -1100,6 +1110,7 @@ def render_dashboard_view(assessments):
                 )
                 if selected_status != status:
                     update_assessment_status(assessment.get("id"), selected_status)
+                    refresh_assessments()
                     st.rerun()
             with action_col2:
                 if st.button("Open", key=f"queue_open_{assessment.get('id')}", width="stretch"):
@@ -1113,6 +1124,7 @@ def render_dashboard_view(assessments):
                 if st.button("Delete", key=f"queue_delete_{assessment.get('id')}", width="stretch"):
 
                     delete_assessment(assessment.get("id"))
+                    refresh_assessments()
                     if st.session_state.active_assessment_id == assessment.get("id"):
                         reset_workspace()
                     st.rerun()
@@ -1177,7 +1189,7 @@ if st.session_state.pending_assessment_title is not None:
     st.session_state.pending_assessment_title = None
 
 
-assessments = load_assessments()
+assessments = get_assessments_cached()
 
 if st.session_state.view_mode == "dashboard":
     render_dashboard_view(assessments)
@@ -1314,16 +1326,19 @@ with col1:
     if st.session_state.follow_up:
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
         with st.expander("Follow-up Questions for Refinement", expanded=False):
-            for i, q in enumerate(st.session_state.follow_up):
-                st.markdown(f'<div class="followup-question">{q}</div>', unsafe_allow_html=True)
-                st.session_state.answers[i] = st.text_input(
-                    q,
-                    key=f"q_{i}",
-                    label_visibility="collapsed",
-                    placeholder="Type your answer..."
-                )
+            with st.form("followup_refinement_form"):
+                for i, q in enumerate(st.session_state.follow_up):
+                    st.markdown(f'<div class="followup-question">{q}</div>', unsafe_allow_html=True)
+                    st.session_state.answers[i] = st.text_input(
+                        q,
+                        key=f"q_{i}",
+                        label_visibility="collapsed",
+                        placeholder="Type your answer..."
+                    )
 
-            if st.button("Refine Answer"):
+                refine_submitted = st.form_submit_button("Refine Answer")
+
+            if refine_submitted:
                 st.session_state.resolved_followups.extend(
                     question for question in st.session_state.follow_up
                     if question not in st.session_state.resolved_followups
@@ -1373,6 +1388,7 @@ with col1:
                 record = build_assessment_record(st.session_state.assessment_title_value, status="Draft")
                 if record:
                     saved = upsert_assessment(record)
+                    refresh_assessments()
                     st.session_state.active_assessment_id = saved.get("id")
                     st.session_state.assessment_title_value = saved.get("title", "")
                     st.session_state.pending_assessment_title = saved.get("title", "")
