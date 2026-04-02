@@ -101,3 +101,26 @@ def test_legacy_json_is_migrated_to_sqlite(monkeypatch):
             assessment_store._MEMORY_CONNECTION.close()
             assessment_store._MEMORY_CONNECTION = None
         shutil.rmtree(test_root, ignore_errors=True)
+
+
+def test_postgres_failure_falls_back_to_sqlite(monkeypatch):
+    test_root = Path("tests") / "_tmp" / f"store_{uuid.uuid4().hex}"
+    try:
+        legacy_path = test_root / "assessments" / "assessments.json"
+        monkeypatch.setattr(assessment_store, "DB_PATH", ":memory:")
+        monkeypatch.setattr(assessment_store, "LEGACY_JSON_PATH", str(legacy_path))
+        monkeypatch.setattr(assessment_store, "_MEMORY_CONNECTION", None)
+        monkeypatch.setattr(assessment_store, "SUPABASE_DB_URL", "postgresql://example")
+        monkeypatch.setattr(assessment_store, "_POSTGRES_DISABLED_UNTIL", 0.0)
+
+        def fail_connect():
+            raise RuntimeError("db unavailable")
+
+        monkeypatch.setattr(assessment_store, "_ensure_postgres_store", fail_connect)
+
+        assert assessment_store.load_assessments() == []
+    finally:
+        if assessment_store._MEMORY_CONNECTION is not None:
+            assessment_store._MEMORY_CONNECTION.close()
+            assessment_store._MEMORY_CONNECTION = None
+        shutil.rmtree(test_root, ignore_errors=True)

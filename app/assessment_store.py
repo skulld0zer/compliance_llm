@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -17,10 +18,17 @@ LEGACY_JSON_PATH = os.path.join("data", "assessments", "assessments.json")
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", "").strip()
 DEFAULT_STATUSES = ["Draft", "Needs More Info", "In Review", "Approved"]
 _MEMORY_CONNECTION = None
+POSTGRES_CONNECT_TIMEOUT_SECONDS = 5
+POSTGRES_DISABLE_SECONDS = 300
+_POSTGRES_DISABLED_UNTIL = 0.0
 
 
 def _is_postgres():
-    return bool(SUPABASE_DB_URL and DB_PATH != ":memory:")
+    return bool(
+        SUPABASE_DB_URL
+        and DB_PATH != ":memory:"
+        and time.time() >= _POSTGRES_DISABLED_UNTIL
+    )
 
 
 def _sqlite_connect():
@@ -33,14 +41,27 @@ def _sqlite_connect():
 
 
 def _postgres_connect():
+    global _POSTGRES_DISABLED_UNTIL
     if psycopg is None:
         raise RuntimeError("psycopg is required for Supabase/Postgres connections.")
-    return psycopg.connect(SUPABASE_DB_URL, row_factory=dict_row)
+    try:
+        return psycopg.connect(
+            SUPABASE_DB_URL,
+            row_factory=dict_row,
+            connect_timeout=POSTGRES_CONNECT_TIMEOUT_SECONDS,
+            sslmode="require",
+        )
+    except Exception:
+        _POSTGRES_DISABLED_UNTIL = time.time() + POSTGRES_DISABLE_SECONDS
+        raise
 
 
 def _connect():
     if _is_postgres():
-        return _postgres_connect()
+        try:
+            return _postgres_connect()
+        except Exception:
+            pass
     conn = _sqlite_connect()
     conn.row_factory = sqlite3.Row
     return conn
@@ -48,7 +69,10 @@ def _connect():
 
 def _ensure_store():
     if _is_postgres():
-        _ensure_postgres_store()
+        try:
+            _ensure_postgres_store()
+        except Exception:
+            _ensure_sqlite_store()
     else:
         _ensure_sqlite_store()
     _migrate_legacy_json_if_present()
