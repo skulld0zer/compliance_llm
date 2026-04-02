@@ -566,6 +566,13 @@ st.markdown(get_background_css(), unsafe_allow_html=True)
 
 
 # ================= HELPERS =================
+def append_debug_event(message):
+    events = st.session_state.setdefault("debug_events", [])
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    events.append(f"[{timestamp}] {message}")
+    st.session_state.debug_events = events[-25:]
+
+
 def extract_json(text):
     match = re.search(r"\{.*\}", text, re.DOTALL)
     return match.group(0) if match else None
@@ -994,6 +1001,7 @@ def render_dashboard_view(assessments):
     nav_col1, nav_col2 = st.columns([1, 3.5])
     with nav_col1:
         if st.button("Back to Workspace", width="stretch"):
+            append_debug_event("Back to Workspace clicked")
             st.session_state.view_mode = "chat"
             st.rerun()
     with nav_col2:
@@ -1193,6 +1201,9 @@ if "dashboard_sort_by" not in st.session_state:
 if "dashboard_sort_dir" not in st.session_state:
     st.session_state.dashboard_sort_dir = "desc"
 
+if "debug_events" not in st.session_state:
+    st.session_state.debug_events = []
+
 if st.session_state.pending_assessment_title is not None:
     st.session_state.assessment_title_value = st.session_state.pending_assessment_title
     st.session_state.assessment_title_input = st.session_state.pending_assessment_title
@@ -1214,7 +1225,7 @@ with col1:
     nav_col1, nav_col2 = st.columns([1.4, 4])
     with nav_col1:
         if st.button("Review Board", width="stretch"):
-
+            append_debug_event("Review Board clicked")
             st.session_state.view_mode = "dashboard"
             st.rerun()
     with nav_col2:
@@ -1236,6 +1247,7 @@ with col1:
     user_input = st.chat_input("Ask something...")
 
     if user_input and not st.session_state.processing:
+        append_debug_event(f"Query submitted: {user_input[:80]}")
         st.session_state.pending_query = user_input
         st.session_state.pending_rule_query = user_input
         st.session_state.display_query = user_input
@@ -1255,19 +1267,25 @@ with col1:
     if st.session_state.pending_query and st.session_state.processing:
         query = st.session_state.pending_query
         rule_query = st.session_state.pending_rule_query or query
+        append_debug_event(f"Query pipeline started: {str(query)[:80]}")
         st.session_state.pending_query = None
         st.session_state.pending_rule_query = None
         st.session_state.display_query = None
         try:
+            append_debug_event("Retrieving context")
             results = retrieve(query)
+            append_debug_event(f"Retrieved {len(results)} chunks")
             decision_data = analyze_question(rule_query)
+            append_debug_event("Decision engine complete")
 
+            append_debug_event("Calling LLM")
             raw = generate_answer(
                 query,
                 results,
                 decision_data["hints"],
                 decision_data["pre_classification"]
             )
+            append_debug_event("LLM returned response")
 
             try:
                 answer = json.loads(extract_json(raw))
@@ -1329,11 +1347,13 @@ with col1:
                 if question not in st.session_state.resolved_followups
             ]
             st.session_state.answers = {}
+            append_debug_event("Query pipeline completed")
         except Exception as exc:
             fallback_message = (
                 "The assessment request timed out or failed while contacting the model provider. "
                 "Please try again in a moment."
             )
+            append_debug_event(f"Query pipeline failed: {exc}")
             st.session_state.follow_up = []
             st.session_state.answers = {}
             st.session_state.last_debug = None
@@ -1369,6 +1389,7 @@ with col1:
                 refine_submitted = st.form_submit_button("Refine Answer")
 
             if refine_submitted:
+                append_debug_event("Follow-up refinement submitted")
                 st.session_state.resolved_followups.extend(
                     question for question in st.session_state.follow_up
                     if question not in st.session_state.resolved_followups
@@ -1414,10 +1435,12 @@ with col1:
         save_col, new_case_col, info_col = st.columns([1, 1, 1])
         with save_col:
             if st.button("Save Current Assessment", width="stretch"):
-
+                append_debug_event("Save Current Assessment clicked")
                 record = build_assessment_record(st.session_state.assessment_title_value, status="Draft")
                 if record:
+                    append_debug_event("Attempting assessment save")
                     saved = upsert_assessment(record)
+                    append_debug_event(f"Assessment save completed: {saved.get('id')}")
                     st.session_state.active_assessment_id = saved.get("id")
                     st.session_state.assessment_title_value = saved.get("title", "")
                     st.session_state.pending_assessment_title = saved.get("title", "")
@@ -1439,6 +1462,11 @@ with col1:
 # ================= INSIGHTS =================
 with col2:
     st.markdown('<div class="header-box"><h2>Insights</h2></div>', unsafe_allow_html=True)
+    with st.expander("Debug Trace", expanded=False):
+        if st.session_state.debug_events:
+            st.code("\n".join(st.session_state.debug_events), language="text")
+        else:
+            st.caption("No debug events yet.")
 
     debug = st.session_state.last_debug
     total_assessments = len(assessments)
