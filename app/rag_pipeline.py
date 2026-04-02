@@ -1,16 +1,23 @@
-import faiss
 import pickle
-from sentence_transformers import SentenceTransformer
+from functools import lru_cache
 
-index = faiss.read_index("data/index/index.faiss")
+import faiss
 
-with open("data/index/metadata.pkl", "rb") as f:
-    metadata = pickle.load(f)
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
+@lru_cache(maxsize=1)
+def _load_rag_assets():
+    # Lazily import sentence-transformers so non-RAG views do not pay the startup cost.
+    from sentence_transformers import SentenceTransformer
+
+    index = faiss.read_index("data/index/index.faiss")
+    with open("data/index/metadata.pkl", "rb") as f:
+        metadata = pickle.load(f)
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    return index, metadata, model
 
 
 def retrieve(query, top_k=5):
+    index, metadata, model = _load_rag_assets()
     query_vec = model.encode([query])
 
     D, I = index.search(query_vec, top_k)
