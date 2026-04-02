@@ -4,3 +4,6 @@ primaryColor="#ff4b4b"
 backgroundColor="#ffffff"
 secondaryBackgroundColor="#f5f5f5"
 textColor="#000000"
+
+[server]
+fileWatcherType="none"

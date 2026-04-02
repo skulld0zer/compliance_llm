@@ -3,6 +3,7 @@ plotly
 python-dotenv
 openai
 sentence-transformers
+torchvision
 faiss-cpu
 requests
 beautifulsoup4
