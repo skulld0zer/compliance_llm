@@ -1258,78 +1258,97 @@ with col1:
         st.session_state.pending_query = None
         st.session_state.pending_rule_query = None
         st.session_state.display_query = None
-
-        results = retrieve(query)
-        decision_data = analyze_question(rule_query)
-
-        raw = generate_answer(
-            query,
-            results,
-            decision_data["hints"],
-            decision_data["pre_classification"]
-        )
-
         try:
-            answer = json.loads(extract_json(raw))
-        except:
-            answer = {"answer": raw}
+            results = retrieve(query)
+            decision_data = analyze_question(rule_query)
 
-        raw_classification = normalize_classification(answer.get("classification", ""))
-        final_classification = resolve_final_classification(
-            answer.get("classification", ""),
-            decision_data
-        )
-        answer["classification"] = final_classification
-        if raw_classification and raw_classification != final_classification:
-            answer["answer"] = (
-                f"{answer.get('answer', '').rstrip()}\n\n"
-                f"Governance note: Based on the structured decision rules in this workspace, "
-                f"this case is currently treated as {classification_label(final_classification)}."
+            raw = generate_answer(
+                query,
+                results,
+                decision_data["hints"],
+                decision_data["pre_classification"]
             )
 
-        confidence, confidence_breakdown = calculate_confidence(
-            results,
-            decision_data,
-            answer,
-            return_breakdown=True
-        )
+            try:
+                answer = json.loads(extract_json(raw))
+            except Exception:
+                answer = {"answer": raw}
 
-        st.session_state.last_debug = {
-            "confidence": confidence,
-            "confidence_breakdown": confidence_breakdown,
-            "classification": answer.get("classification", ""),
-            "decision_tree": decision_data["decision_tree"],
-            "sources": results
-        }
+            raw_classification = normalize_classification(answer.get("classification", ""))
+            final_classification = resolve_final_classification(
+                answer.get("classification", ""),
+                decision_data
+            )
+            answer["classification"] = final_classification
+            if raw_classification and raw_classification != final_classification:
+                answer["answer"] = (
+                    f"{answer.get('answer', '').rstrip()}\n\n"
+                    f"Governance note: Based on the structured decision rules in this workspace, "
+                    f"this case is currently treated as {classification_label(final_classification)}."
+                )
 
-        if st.session_state.messages and st.session_state.messages[-1].get("typing"):
-            st.session_state.messages[-1] = {
-                "role": "assistant",
-                "content": answer["answer"]
+            confidence, confidence_breakdown = calculate_confidence(
+                results,
+                decision_data,
+                answer,
+                return_breakdown=True
+            )
+
+            st.session_state.last_debug = {
+                "confidence": confidence,
+                "confidence_breakdown": confidence_breakdown,
+                "classification": answer.get("classification", ""),
+                "decision_tree": decision_data["decision_tree"],
+                "sources": results
             }
-        else:
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": answer["answer"]
-            })
 
-        answer_followups = answer.get("follow_up", []) if isinstance(answer, dict) else []
-        next_followups = []
-        for question in list(answer_followups) + list(generate_followups(decision_data["decision_tree"])):
-            clean_question = str(question).strip()
-            if not clean_question:
-                continue
-            if clean_question in st.session_state.resolved_followups:
-                continue
-            if clean_question in next_followups:
-                continue
-            next_followups.append(clean_question)
-        st.session_state.follow_up = [
-            question for question in next_followups
-            if question not in st.session_state.resolved_followups
-        ]
-        st.session_state.answers = {}
-        st.session_state.processing = False
+            if st.session_state.messages and st.session_state.messages[-1].get("typing"):
+                st.session_state.messages[-1] = {
+                    "role": "assistant",
+                    "content": answer["answer"]
+                }
+            else:
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": answer["answer"]
+                })
+
+            answer_followups = answer.get("follow_up", []) if isinstance(answer, dict) else []
+            next_followups = []
+            for question in list(answer_followups) + list(generate_followups(decision_data["decision_tree"])):
+                clean_question = str(question).strip()
+                if not clean_question:
+                    continue
+                if clean_question in st.session_state.resolved_followups:
+                    continue
+                if clean_question in next_followups:
+                    continue
+                next_followups.append(clean_question)
+            st.session_state.follow_up = [
+                question for question in next_followups
+                if question not in st.session_state.resolved_followups
+            ]
+            st.session_state.answers = {}
+        except Exception as exc:
+            fallback_message = (
+                "The assessment request timed out or failed while contacting the model provider. "
+                "Please try again in a moment."
+            )
+            st.session_state.follow_up = []
+            st.session_state.answers = {}
+            st.session_state.last_debug = None
+            if st.session_state.messages and st.session_state.messages[-1].get("typing"):
+                st.session_state.messages[-1] = {
+                    "role": "assistant",
+                    "content": f"{fallback_message}\n\nTechnical note: {exc}"
+                }
+            else:
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"{fallback_message}\n\nTechnical note: {exc}"
+                })
+        finally:
+            st.session_state.processing = False
 
         st.rerun()
 
